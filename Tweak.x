@@ -1,11 +1,10 @@
-// FaceIDFor6s v7 — работает везде
+// FaceIDFor6s v8
 
 #import <LocalAuthentication/LocalAuthentication.h>
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
 #import <Vision/Vision.h>
 
-// ─── Настройки ────────────────────────────────────────────────────────────────
 #define kPref @"/var/mobile/Library/Preferences/com.yourname.faceidfor6s.plist"
 
 static BOOL      gEnabled        = YES;
@@ -14,12 +13,12 @@ static NSInteger gTimeout        = 5;
 
 static void FIDLoadPrefs(void) {
     NSDictionary *d = [NSDictionary dictionaryWithContentsOfFile:kPref];
-    gEnabled        = d[@"enabled"]     ? [d[@"enabled"] boolValue]          : YES;
-    gRequiredFrames = d[@"sensitivity"] ? [d[@"sensitivity"] integerValue]   : 5;
-    gTimeout        = d[@"timeout"]     ? [d[@"timeout"] integerValue]       : 5;
+    gEnabled        = d[@"enabled"]     ? [d[@"enabled"] boolValue]        : YES;
+    gRequiredFrames = d[@"sensitivity"] ? [d[@"sensitivity"] integerValue] : 5;
+    gTimeout        = d[@"timeout"]     ? [d[@"timeout"] integerValue]     : 5;
 }
 
-// ─── Форварды ─────────────────────────────────────────────────────────────────
+// ─── Форварды SpringBoard ─────────────────────────────────────────────────────
 @interface SBFUserAuthenticationController : NSObject
 - (void)_biometricAuthenticationDidSucceed;
 - (void)_biometricAuthenticationDidFail;
@@ -27,7 +26,8 @@ static void FIDLoadPrefs(void) {
 
 @interface SBUIBiometricEventMonitor : NSObject
 + (instancetype)sharedInstance;
-- (void)touchIDManagerDidFinishMatching:(id)arg1;
+- (void)_startAuthForReason:(NSInteger)reason;
+- (void)handleBiometricEventRecordMatched:(BOOL)matched;
 @end
 
 // ─── Сканер ───────────────────────────────────────────────────────────────────
@@ -107,7 +107,6 @@ didOutputSampleBuffer:(CMSampleBufferRef)buf
     [[[VNImageRequestHandler alloc] initWithCVPixelBuffer:px options:@{}]
         performRequests:@[req] error:nil];
 }
-
 @end
 
 // ─── Оверлей ──────────────────────────────────────────────────────────────────
@@ -165,9 +164,8 @@ didOutputSampleBuffer:(CMSampleBufferRef)buf
 
 - (void)animate {
     CABasicAnimation *a = [CABasicAnimation animationWithKeyPath:@"position.y"];
-    a.fromValue = @(_oval.origin.y+2);
-    a.toValue   = @(CGRectGetMaxY(_oval)-2);
-    a.duration  = 1.4; a.repeatCount = HUGE_VALF; a.autoreverses = YES;
+    a.fromValue = @(_oval.origin.y+2); a.toValue = @(CGRectGetMaxY(_oval)-2);
+    a.duration = 1.4; a.repeatCount = HUGE_VALF; a.autoreverses = YES;
     a.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];
     [_line addAnimation:a forKey:@"s"];
 }
@@ -179,7 +177,6 @@ didOutputSampleBuffer:(CMSampleBufferRef)buf
         ? [UIColor colorWithRed:0.2 green:0.88 blue:0.45 alpha:1]
         : [UIColor colorWithRed:1 green:0.3 blue:0.3 alpha:1];
 }
-
 @end
 
 // ─── Аутентификация ───────────────────────────────────────────────────────────
@@ -190,7 +187,6 @@ static void FIDRun(NSString *reason, void(^reply)(BOOL, NSError*)) {
                                       code:LAErrorBiometryNotAvailable userInfo:nil]);
         return;
     }
-
     dispatch_async(dispatch_get_main_queue(), ^{
         UIWindow *win = nil;
         for (UIWindowScene *sc in UIApplication.sharedApplication.connectedScenes) {
@@ -229,10 +225,9 @@ static void FIDRun(NSString *reason, void(^reply)(BOOL, NSError*)) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
-// HOOKS
+// HOOKS — один блок LAContext, все методы внутри
 // ════════════════════════════════════════════════════════════════════════════════
 
-// ─── LAContext — перехватываем во ВСЕХ приложениях ───────────────────────────
 %hook LAContext
 
 - (LABiometryType)biometryType {
@@ -255,35 +250,14 @@ static void FIDRun(NSString *reason, void(^reply)(BOOL, NSError*)) {
        localizedReason:(NSString *)reason
                  reply:(void(^)(BOOL,NSError*))reply {
     FIDLoadPrefs();
-    if (gEnabled && policy == LAPolicyDeviceOwnerAuthenticationWithBiometrics) {
+    if (gEnabled && (policy == LAPolicyDeviceOwnerAuthenticationWithBiometrics ||
+                     policy == LAPolicyDeviceOwnerAuthentication)) {
         FIDRun(reason, reply);
         return;
     }
     %orig;
 }
 
-%end
-
-// ─── SpringBoard — разблокировка ─────────────────────────────────────────────
-%hook SBFUserAuthenticationController
-
-- (void)_evaluateBiometricAuthentication {
-    FIDLoadPrefs();
-    if (!gEnabled) { %orig; return; }
-    FIDRun(@"Разблокировать iPhone", ^(BOOL ok, NSError *e) {
-        if (ok) [self _biometricAuthenticationDidSucceed];
-        else    [self _biometricAuthenticationDidFail];
-    });
-}
-
-%end
-
-// ─── Покупки / App Store / Apple Pay ─────────────────────────────────────────
-// iOS использует отдельный процесс com.apple.SecurityAgent для подтверждения
-// биометрии при покупках — перехватываем через LAContext который там тоже работает
-%hook LAContext
-
-// Метод который вызывается при покупках и Apple Pay
 - (void)evaluateAccessControl:(SecAccessControlRef)accessControl
                     operation:(LAAccessControlOperation)operation
               localizedReason:(NSString *)reason
@@ -298,7 +272,35 @@ static void FIDRun(NSString *reason, void(^reply)(BOOL, NSError*)) {
 
 %end
 
-// ─── Инициализация ────────────────────────────────────────────────────────────
+// ─── SpringBoard — разблокировка экрана ──────────────────────────────────────
+%hook SBFUserAuthenticationController
+
+- (void)_evaluateBiometricAuthentication {
+    FIDLoadPrefs();
+    if (!gEnabled) { %orig; return; }
+    FIDRun(@"Разблокировать iPhone", ^(BOOL ok, NSError *e) {
+        if (ok) [self _biometricAuthenticationDidSucceed];
+        else    [self _biometricAuthenticationDidFail];
+    });
+}
+
+%end
+
+// ─── Дополнительный хук для iOS 15 SpringBoard ───────────────────────────────
+%hook SBUIBiometricEventMonitor
+
+- (void)_startAuthForReason:(NSInteger)reason {
+    FIDLoadPrefs();
+    if (!gEnabled) { %orig; return; }
+    FIDRun(@"Разблокировать iPhone", ^(BOOL ok, NSError *e) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self handleBiometricEventRecordMatched:ok];
+        });
+    });
+}
+
+%end
+
 %ctor {
     FIDLoadPrefs();
     CFNotificationCenterAddObserver(
