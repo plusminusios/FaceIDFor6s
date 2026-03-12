@@ -5,10 +5,16 @@
 <dict>
     <key>Filter</key>
     <dict>
+        <key>Bundles</key>
+        <array>
+            <string>com.apple.springboard</string>
+        </array>
         <key>Libraries</key>
         <array>
             <string>/System/Library/Frameworks/LocalAuthentication.framework/LocalAuthentication</string>
         </array>
+        <key>Mode</key>
+        <string>Any</string>
     </dict>
 </dict>
 </plist>
