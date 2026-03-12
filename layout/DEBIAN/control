@@ -1,6 +1,6 @@
 Package: com.yourname.faceidfor6s
 Name: FaceIDFor6s
-Version: 6.0.0
+Version: 6.0.1
 Architecture: iphoneos-arm64
 Description: Face ID для iPhone 6s через фронтальную камеру.
  Настройки: Настройки → Face ID для iPhone 6s
