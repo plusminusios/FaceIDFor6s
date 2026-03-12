@@ -5,13 +5,10 @@
 <dict>
     <key>Filter</key>
     <dict>
-        <key>Bundles</key>
+        <key>Libraries</key>
         <array>
-            <string>com.apple.springboard</string>
-            <string>com.apple.UIKit</string>
+            <string>/System/Library/Frameworks/LocalAuthentication.framework/LocalAuthentication</string>
         </array>
-        <key>Mode</key>
-        <string>Any</string>
     </dict>
 </dict>
 </plist>
