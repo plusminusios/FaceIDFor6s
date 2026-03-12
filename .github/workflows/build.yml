@@ -1,0 +1,16 @@
+name: Build DEB
+on: [push]
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Theos
+        uses: Randomblock1/theos-action@v1
+      - name: Build
+        run: gmake package FINALPACKAGE=1
+      - name: Upload DEB
+        uses: actions/upload-artifact@v4
+        with:
+          name: FaceIDFor6s.deb
+          path: packages/*.deb
